@@ -57,54 +57,85 @@ type ScoreTable struct {
 	Runs    int     `json: Runs`
 }
 
+type responseBody struct {
+	Status string `json: status`
+}
+
 func main() {
 	// mysql -u root -p mysqlpass
 	fmt.Println("This is my first mysql")
 
 	r := mux.NewRouter()
 	//Read API
-	r.HandleFunc("/data/{country}", handleGetWithQueryParam).Methods("GET")
+	r.HandleFunc("/data/", handleGetWithQueryParam).Methods("GET")
 	//Delete API
-	r.HandleFunc("/data/{country}", handlerDelete).Methods("DELETE")
+	r.HandleFunc("/data/", handlerDelete).Methods("DELETE")
 	//Create API
 	r.HandleFunc("/data/", handlerPostWithRequestBody).Methods("POST")
 	// Update API
 	r.HandleFunc("/data/{country}/", handleUpdate).Methods("PUT")
 
+	//Test API
+	r.HandleFunc("/data/hello/", handleHello).Methods("GET")
+
 	http.Handle("/", r)
 
 	http.ListenAndServe(":8089", nil)
+
+}
+
+func handleHello(w http.ResponseWriter, r *http.Request) {
+	fmt.Println("This is Hello Database prgm")
+
+}
+
+func handleGetWithQueryParam(w http.ResponseWriter, r *http.Request) {
+
+	//curl -X GET "http://127.0.0.1:8089/data/?country="Iran""
+
+	//curl -X GET "http://127.0.0.1:8089/data/?country="Pakisthan""
+	QueryParams := r.URL.Query()
+
+	name := QueryParams.Get("country")
 
 	db, err := sql.Open("mysql", "root:mysqlpass@tcp(localhost:3306)/cricket")
 	if err != nil {
 		log.Fatal(err)
 	}
 	defer db.Close()
-}
 
-func handleGetWithQueryParam(w http.ResponseWriter, r *http.Request) {
-	QueryParams := r.URL.Query()
-
-	name := QueryParams.Get("country")
-
-	rows, err := db.Query("SELECT * FROM score where country=", name)
+	// Use a prepared statement to insert the value
+	stmt, err := db.Prepare("SELECT * FROM score WHERE country = ?")
 	if err != nil {
 		log.Fatal(err)
 	}
+	defer stmt.Close()
 
-	defer rows.Close()
+	rows, err := stmt.Query(name)
+	if err != nil {
+		log.Fatal(err)
 
-	for rows.Next() {
-		var country string
-		var Runs int
-		var Overs float32
-		err := rows.Scan(&Overs, &Runs, &country)
-		if err != nil {
-			log.Fatal(err)
-		}
-		fmt.Println("Get details of country: ", name)
-		fmt.Println(country, Runs, Overs)
 	}
+	var resp1 responseBody
+	resp1.Status = "NO DATA FOUND"
+	for rows.Next() {
+		var details ScoreTable
+		err := rows.Scan(&details.Overs, &details.Runs, &details.Country)
+		if err != nil {
+
+			log.Fatal(err)
+
+		}
+
+		fmt.Println("Get details of country: ", name)
+		fmt.Println(details.Country, details.Overs, details.Runs)
+		resp1.Status = fmt.Sprintf("Country: %s, Overs: %d, Runs: %d}", details.Country, details.Runs, details.Overs)
+
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(http.StatusOK)
+	json.NewEncoder(w).Encode(resp1)
 
 }
 
@@ -114,9 +145,21 @@ func handleUpdate(w http.ResponseWriter, r *http.Request) {
 
 func handlerDelete(w http.ResponseWriter, r *http.Request) {
 
+	// curl -X DELETE "http://127.0.0.1:8089/data/?country="Pakisthan""
+	// {"Status":"Details not found"}
+
+	// curl -X DELETE "http://127.0.0.1:8089/data/?country="Pakisthan""
+	// {"Status":"Deleted"}
+
 	QueryParams := r.URL.Query()
 
 	name := QueryParams.Get("country")
+
+	db, err := sql.Open("mysql", "root:mysqlpass@tcp(localhost:3306)/cricket")
+	if err != nil {
+		log.Fatal(err)
+	}
+	defer db.Close()
 
 	// Use a prepared statement to insert the value
 	stmt, err := db.Prepare("DELETE FROM score where country=?")
@@ -125,11 +168,20 @@ func handlerDelete(w http.ResponseWriter, r *http.Request) {
 	}
 	defer stmt.Close()
 
-	// Execute the prepared statement with the variable value
-	_, err = stmt.Exec(name)
-	if err != nil {
-		log.Fatal(err)
+	var resp1 responseBody
+	rows, err := stmt.Exec(name)
+	result, err := rows.RowsAffected()
+	if result != 0 {
+		resp1.Status = "Deleted"
+
+	} else {
+		resp1.Status = "Details not found"
+
 	}
+
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(http.StatusOK)
+	json.NewEncoder(w).Encode(resp1)
 
 	fmt.Println("Deleted details of country: ", name)
 
