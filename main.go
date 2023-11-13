@@ -68,15 +68,18 @@ func main() {
 	r := mux.NewRouter()
 	//Read API
 	r.HandleFunc("/data/", handleGetWithQueryParam).Methods("GET")
-	//Delete API
+	//Delete API with country value as query parameter
 	r.HandleFunc("/data/", handlerDelete).Methods("DELETE")
 	//Create API
 	r.HandleFunc("/data/", handlerPostWithRequestBody).Methods("POST")
-	// Update API
-	r.HandleFunc("/data/{country}/", handleUpdate).Methods("PUT")
+	// Update API with country value as path variable
+	r.HandleFunc("/data/{country}", handleUpdate).Methods("PUT")
 
 	//Test API
 	r.HandleFunc("/data/hello/", handleHello).Methods("GET")
+
+	//GET all details
+	r.HandleFunc("/data/Getall", handlerGetAll).Methods("GET")
 
 	http.Handle("/", r)
 
@@ -86,6 +89,44 @@ func main() {
 
 func handleHello(w http.ResponseWriter, r *http.Request) {
 	fmt.Println("This is Hello Database prgm")
+
+}
+
+func handlerGetAll(w http.ResponseWriter, r *http.Request) {
+
+	// curl -X GET "http://127.0.0.1:8089/data/Getall"
+
+	db, err := sql.Open("mysql", "root:mysqlpass@tcp(localhost:3306)/cricket")
+	if err != nil {
+		log.Fatal(err)
+	}
+	defer db.Close()
+
+	// Use a prepared statement to insert the value
+	rows, err := db.Query("SELECT * FROM score")
+	if err != nil {
+		log.Fatal(err)
+	}
+	defer rows.Close()
+
+	var resp1 responseBody
+	for rows.Next() {
+		var details ScoreTable
+		err := rows.Scan(&details.Overs, &details.Runs, &details.Country)
+		if err != nil {
+
+			log.Fatal(err)
+
+		}
+
+		fmt.Println(details.Country, details.Overs, details.Runs)
+		resp1.Status = resp1.Status + " " + fmt.Sprintf("Country: %s, Overs: %f, Runs: %d}", details.Country, details.Runs, details.Overs)
+
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(http.StatusOK)
+	json.NewEncoder(w).Encode(resp1)
 
 }
 
@@ -141,6 +182,49 @@ func handleGetWithQueryParam(w http.ResponseWriter, r *http.Request) {
 
 func handleUpdate(w http.ResponseWriter, r *http.Request) {
 
+	// curl -X PUT "http://127.0.0.1:8089/data/SriLanka" -d '{"Runs": 278, "Overs": 50.0}'
+
+	var details ScoreTable
+	// Extract the path variable "country" from the URL
+	vars := mux.Vars(r)
+	name := vars["country"]
+
+	err := json.NewDecoder(r.Body).Decode(&details)
+	if err != nil {
+		http.Error(w, "Failed to decode request body", http.StatusBadRequest)
+		return
+	}
+
+	db, err := sql.Open("mysql", "root:mysqlpass@tcp(localhost:3306)/cricket")
+	if err != nil {
+		log.Fatal(err)
+	}
+	defer db.Close()
+
+	// Use a prepared statement to insert the value
+	stmt, err := db.Prepare("UPDATE score SET Overs = ?,Runs = ? WHERE country = ?")
+	if err != nil {
+		log.Fatal(err)
+	}
+	defer stmt.Close()
+	var resp1 responseBody
+	rows, err := stmt.Exec(details.Overs, details.Runs, name)
+	fmt.Println(details.Overs, details.Runs, name)
+	result, err := rows.RowsAffected()
+	if result != 0 {
+		resp1.Status = "Updated"
+
+	} else {
+		resp1.Status = "Details not found"
+
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(http.StatusOK)
+	json.NewEncoder(w).Encode(resp1)
+
+	fmt.Println("Updated details of country: ", name)
+
 }
 
 func handlerDelete(w http.ResponseWriter, r *http.Request) {
@@ -188,23 +272,44 @@ func handlerDelete(w http.ResponseWriter, r *http.Request) {
 }
 
 func handlerPostWithRequestBody(w http.ResponseWriter, r *http.Request) {
+
+	// curl -X POST "http://127.0.0.1:8089/data/" -d '{"Country":"Newzealand", "Runs": 278, "Overs": 50.0}'
+
+	// curl -X POST "http://127.0.0.1:8089/data/" -d '{"Country":"Iraq", "Runs": 328, "Overs": 30.0}'
+
 	var details ScoreTable
-	err := json.NewDecoder(r.Body).Decode(details)
+	err := json.NewDecoder(r.Body).Decode(&details)
 	if err != nil {
 		http.Error(w, "Failed to decode request body", http.StatusBadRequest)
 		return
 	}
+
+	db, err := sql.Open("mysql", "root:mysqlpass@tcp(localhost:3306)/cricket")
+	if err != nil {
+		log.Fatal(err)
+	}
+	defer db.Close()
+
 	// Use a prepared statement to insert the value
 	stmt, err := db.Prepare("INSERT INTO score (Overs, Runs, country) VALUES (?, ?, ?)")
 	if err != nil {
 		log.Fatal(err)
 	}
 	defer stmt.Close()
-
+	var resp1 responseBody
 	// Execute the prepared statement with the variable value
 	_, err = stmt.Exec(details.Overs, details.Runs, details.Country)
 	if err != nil {
-		log.Fatal(err)
+		resp1.Status = "ERROR"
+
+	} else {
+		resp1.Status = "OK"
 	}
+
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(http.StatusOK)
+	json.NewEncoder(w).Encode(resp1)
+
+	fmt.Println("Added details of country: ", details.Country)
 
 }
